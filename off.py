@@ -3,8 +3,9 @@ import os
 import time
 import csv
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import urlparse
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup
@@ -18,163 +19,29 @@ from telegram.ext import (
     TypeHandler
 )
 
-# Load environment variables
-load_dotenv()
-TOKEN = os.getenv('BOT_TOKEN')
+# ... [Bagian yang sama sampai ke CSV_FILE] ...
 
 # Konfigurasi CSV
 CSV_FILE = "airdropbot.csv"
+CSV_COLUMNS = ['Nama', 'Twitter', 'Discord', 'Telegram', 'Link', 'Type', 'Deadline']
 
-# States untuk conversation handler
-NAMA, TWITTER, DISCORD, TELEGRAM, LINK, TYPE = range(6)
+# States baru
+NAMA, TWITTER, DISCORD, TELEGRAM, LINK, TYPE, DEADLINE = range(7)
 
-# Logging configuration
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
-    handlers=[
-        logging.FileHandler('bot_debug.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+# ... [Bagian yang sama sampai ke init_csv] ...
 
-# CSV Functions
 def init_csv():
     if not Path(CSV_FILE).exists():
         with open(CSV_FILE, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            writer.writerow(['Nama', 'Twitter', 'Discord', 'Telegram', 'Link', 'Type'])
+            writer.writerow(CSV_COLUMNS)
 
 def append_to_csv(data):
     with open(CSV_FILE, 'a', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(data)
 
-def read_csv():
-    with open(CSV_FILE, 'r', newline='', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        return list(reader)
-
-# Utility functions
-def is_valid_url(url):
-    try:
-        result = urlparse(url)
-        return all([result.scheme, result.netloc])
-    except:
-        return False
-
-async def limit_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if context.user_data.get('last_request'):
-        elapsed = time.time() - context.user_data['last_request']
-        if elapsed < 5:
-            await update.message.reply_text("⏳ Mohon tunggu 5 detik antar request")
-            return
-    context.user_data['last_request'] = time.time()
-
-# Handlers
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    reply_keyboard = [['Skip']]
-    await update.message.reply_text(
-        'Halo! Mari kita tambahkan airdrop baru. Silakan masukkan NAMA:',
-        reply_markup=ReplyKeyboardMarkup(
-            reply_keyboard, 
-            one_time_keyboard=True,
-            resize_keyboard=True
-        )
-    )
-    return NAMA
-
-async def get_nama(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_input = update.message.text
-    context.user_data['nama'] = user_input if user_input != 'Skip' else '-'
-    
-    reply_keyboard = [['Skip']]
-    await update.message.reply_text(
-        'Masukkan LINK TWITTER:',
-        reply_markup=ReplyKeyboardMarkup(
-            reply_keyboard,
-            one_time_keyboard=True,
-            resize_keyboard=True
-        )
-    )
-    return TWITTER
-
-async def get_twitter(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_input = update.message.text
-    
-    if user_input == 'Skip':
-        context.user_data['twitter'] = '-'
-    else:
-        if not is_valid_url(user_input):
-            await update.message.reply_text(
-                "❌ Format URL Twitter tidak valid! Ketik URL yang benar atau 'Skip'",
-                reply_markup=ReplyKeyboardMarkup([['Skip']], resize_keyboard=True)
-            )
-            return TWITTER
-        context.user_data['twitter'] = user_input
-    
-    reply_keyboard = [['Skip']]
-    await update.message.reply_text(
-        'Masukkan LINK DISCORD:',
-        reply_markup=ReplyKeyboardMarkup(
-            reply_keyboard,
-            one_time_keyboard=True,
-            resize_keyboard=True
-        )
-    )
-    return DISCORD
-
-async def get_discord(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_input = update.message.text
-    
-    if user_input == 'Skip':
-        context.user_data['discord'] = '-'
-    else:
-        if not is_valid_url(user_input):
-            await update.message.reply_text(
-                "❌ Format URL Discord tidak valid! Ketik URL yang benar atau 'Skip'",
-                reply_markup=ReplyKeyboardMarkup([['Skip']], resize_keyboard=True)
-            )
-            return DISCORD
-        context.user_data['discord'] = user_input
-    
-    reply_keyboard = [['Skip']]
-    await update.message.reply_text(
-        'Masukkan LINK TELEGRAM:',
-        reply_markup=ReplyKeyboardMarkup(
-            reply_keyboard,
-            one_time_keyboard=True,
-            resize_keyboard=True
-        )
-    )
-    return TELEGRAM
-
-async def get_telegram(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_input = update.message.text
-    
-    if user_input == 'Skip':
-        context.user_data['telegram'] = '-'
-    else:
-        if not is_valid_url(user_input):
-            await update.message.reply_text(
-                "❌ Format URL Telegram tidak valid! Ketik URL yang benar atau 'Skip'",
-                reply_markup=ReplyKeyboardMarkup([['Skip']], resize_keyboard=True)
-            )
-            return TELEGRAM
-        context.user_data['telegram'] = user_input
-    
-    reply_keyboard = [['Skip']]
-    await update.message.reply_text(
-        'Masukkan LINK AIRDROP:',
-        reply_markup=ReplyKeyboardMarkup(
-            reply_keyboard,
-            one_time_keyboard=True,
-            resize_keyboard=True
-        )
-    )
-    return LINK
+# ... [Bagian yang sama sampai ke get_link] ...
 
 async def get_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text
@@ -204,8 +71,36 @@ async def get_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return TYPE
 
-async def save_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Tambah state deadline
+async def get_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['type'] = update.message.text
+    
+    reply_keyboard = [['Skip']]
+    await update.message.reply_text(
+        'Masukkan DEADLINE (DD-MM-YYYY HH:mm) atau Skip:',
+        reply_markup=ReplyKeyboardMarkup(
+            reply_keyboard,
+            one_time_keyboard=True,
+            resize_keyboard=True
+        )
+    )
+    return DEADLINE
+
+async def save_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_input = update.message.text
+    
+    # Parse deadline
+    if user_input != 'Skip':
+        try:
+            deadline = datetime.strptime(user_input, "%d-%m-%Y %H:%M")
+            context.user_data['deadline'] = deadline.strftime("%d-%m-%Y %H:%M")
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Format deadline salah! Gunakan DD-MM-YYYY HH:mm atau Skip"
+            )
+            return DEADLINE
+    else:
+        context.user_data['deadline'] = '-'
     
     try:
         row = [
@@ -214,7 +109,8 @@ async def save_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['discord'],
             context.user_data['telegram'],
             context.user_data['link'],
-            context.user_data['type']
+            context.user_data['type'],
+            context.user_data['deadline']
         ]
         append_to_csv(row)
         await update.message.reply_text('✅ Data berhasil disimpan!')
@@ -224,193 +120,105 @@ async def save_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     return ConversationHandler.END
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text('Input dibatalkan')
-    return ConversationHandler.END
-
-async def list_airdrops(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        records = read_csv()
-        
-        if not records:
-            await update.message.reply_text("📭 Database airdrop kosong")
-            return
-            
-        response = "📋 <b>DAFTAR AIRDROP</b>\n\n"
-        for idx, record in enumerate(records, 1):
-            entry = (
-                f"━━━━━━━━━━━━━━━━━\n"
-                f"🆔 <b>Entry {idx}</b>\n\n"
-                f"<b>Nama:</b> {record['Nama']}\n"
-                f"<b>Twitter:</b> {record['Twitter']}\n"
-                f"<b>Discord:</b> {record['Discord']}\n"
-                f"<b>Telegram:</b> {record['Telegram']}\n"
-                f"<b>Link:</b> {record['Link']}\n"
-                f"<b>Type:</b> {record['Type']}\n"
-            )
-            
-            if len(response + entry) > 4000:
-                await update.message.reply_html(response)
-                response = "📋 <b>DAFTAR AIRDROP</b> (Lanjutan)\n\n"
-            
-            response += entry
-
-        if response:
-            await update.message.reply_html(response)
-            
-    except Exception as e:
-        logger.error(f"List error: {e}")
-        await update.message.reply_text("🔧 Gagal mengambil data, coba lagi nanti")
-
-async def search_airdrops(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        keyword = update.message.text.split(' ', 1)[1].lower()
-    except IndexError:
-        await update.message.reply_text("❌ Format pencarian salah\nContoh: /search Bitcoin")
-        return
+# Fungsi reminder
+async def check_deadlines(context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.now()
+    records = read_csv()
     
-    try:
-        records = read_csv()
-        
-        results = []
-        for record in records:
-            if (keyword in record['Nama'].lower() or 
-                keyword in record['Type'].lower()):
-                results.append(record)
-        
-        if not results:
-            await update.message.reply_text(f"🔍 Tidak ditemukan airdrop dengan kata kunci '{keyword}'")
-            return
-            
-        response = f"🔍 <b>HASIL PENCARIAN '{keyword.upper()}':</b>\n\n"
-        for result in results:
-            entry = (
-                f"━━━━━━━━━━━━━━━━━\n"
-                f"<b>Nama:</b> {result['Nama']}\n"
-                f"<b>Twitter:</b> {result['Twitter']}\n"
-                f"<b>Discord:</b> {result['Discord']}\n"
-                f"<b>Telegram:</b> {result['Telegram']}\n"
-                f"<b>Link:</b> {result['Link']}\n"
-                f"<b>Type:</b> {result['Type']}\n"
-            )
-            
-            if len(response + entry) > 4000:
-                await update.message.reply_html(response)
-                response = f"🔍 <b>HASIL PENCARIAN '{keyword.upper()}' (Lanjutan):</b>\n\n"
-            
-            response += entry
+    for record in records:
+        if record['Deadline'] != '-':
+            try:
+                deadline = datetime.strptime(record['Deadline'], "%d-%m-%Y %H:%M")
+                time_diff = deadline - now
+                
+                if timedelta(0) < time_diff < timedelta(hours=24):
+                    message = (
+                        f"⏳ DEADLINE MENDEKAT!\n\n"
+                        f"📛 {record['Nama']}\n"
+                        f"🔗 {record['Link']}\n"
+                        f"⏰ Tersisa {time_diff.seconds//3600} jam"
+                    )
+                    await context.bot.send_message(
+                        chat_id=context.job.chat_id,
+                        text=message
+                    )
+            except:
+                continue
 
-        if response:
-            await update.message.reply_html(response)
-            
-    except Exception as e:
-        logger.error(f"Search error: {e}")
-        await update.message.reply_text("🔧 Gagal melakukan pencarian")
+async def periodic_reminder(context: ContextTypes.DEFAULT_TYPE):
+    records = read_csv()
+    await context.bot.send_message(
+        chat_id=context.job.chat_id,
+        text=f"📌 Periodic Reminder!\nTotal Airdrop Aktif: {len(records)}"
+    )
 
-async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        records = read_csv()
-        
-        if not records:
-            await update.message.reply_text("📭 Database airdrop kosong")
-            return
-            
-        # Hitung statistik
-        stats = {}
-        for record in records:
-            airdrop_type = record['Type']
-            stats[airdrop_type] = stats.get(airdrop_type, 0) + 1
-            
-        # Format pesan
-        message = "📊 <b>STATISTIK AIRDROP</b>\n\n"
-        message += f"🪙 Total Airdrop: {len(records)}\n"
-        message += "━━━━━━━━━━━━━━━━━\n"
-        
-        # Urutkan dari yang terbanyak
-        sorted_stats = sorted(stats.items(), key=lambda x: x[1], reverse=True)
-        
-        # Emoji untuk tiap kategori
-        type_emojis = {
-            'Galxe': '🌌',
-            'Testnet': '🔧',
-            'Layer3': '📡',
-            'Waitlist': '📝',
-            'Node': '🖥️',
-            'Social Task': '💬'
-        }
-        
-        for type_name, count in sorted_stats:
-            emoji = type_emojis.get(type_name, '🔘')
-            message += f"{emoji} <b>{type_name}:</b> {count}\n"
-            
-        message += "\nℹ️ Gunakan /list untuk melihat detail"
-        
-        await update.message.reply_html(message)
-        
-    except Exception as e:
-        logger.error(f"Stats error: {e}")
-        await update.message.reply_text("🔧 Gagal memuat statistik")
+async def daily_summary(context: ContextTypes.DEFAULT_TYPE):
+    records = read_csv()
+    upcoming = sum(1 for r in records if r['Deadline'] != '-')
+    await context.bot.send_message(
+        chat_id=context.job.chat_id,
+        text=f"📊 Laporan Harian\n• Total: {len(records)}\n• Deadline Mendatang: {upcoming}"
+    )
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    help_text = """
-📚 Panduan Penggunaan:
-/start - Mulai input data baru
-/list - Tampilkan semua airdrop
-/stats - Tampilkan statistik
-/search [keyword] - Cari airdrop
-/help - Tampilkan pesan ini
-/cancel - Batalkan proses input
-"""
-    await update.message.reply_text(help_text)
+async def weekly_summary(context: ContextTypes.DEFAULT_TYPE):
+    records = read_csv()
+    weekly_stats = {}
+    for r in records:
+        weekly_stats[r['Type']] = weekly_stats.get(r['Type'], 0) + 1
+    
+    stats_text = "\n".join([f"• {k}: {v}" for k,v in weekly_stats.items()])
+    await context.bot.send_message(
+        chat_id=context.job.chat_id,
+        text=f"📈 Laporan Mingguan\n{stats_text}"
+    )
 
-async def invalid_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("⚠️ Input tidak valid! Silakan ikuti petunjuk (/help untuk bantuan)")
+# Command handler baru
+async def set_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    scheduler = context.job_queue.scheduler
+    
+    # Hapus job lama jika ada
+    if 'jobs' in context.chat_data:
+        for job in context.chat_data['jobs']:
+            job.remove()
+    
+    # Buat job baru
+    jobs = [
+        scheduler.add_job(daily_summary, 'cron', hour=9, args=[context], id=f"daily_{chat_id}"),
+        scheduler.add_job(weekly_summary, 'cron', day_of_week='mon', hour=9, args=[context], id=f"weekly_{chat_id}"),
+        scheduler.add_job(check_deadlines, 'interval', hours=6, args=[context], id=f"deadline_{chat_id}"),
+        scheduler.add_job(periodic_reminder, 'interval', hours=4, args=[context], id=f"periodic_{chat_id}")
+    ]
+    
+    context.chat_data['jobs'] = jobs
+    await update.message.reply_text("🔔 Reminder aktif!\n• Daily 09:00\n• Weekly Senin 09:00\n• Cek deadline tiap 6 jam\n• Periodic tiap 4 jam")
 
+# Di main() tambahkan scheduler
 def main():
     init_csv()
     application = Application.builder().token(TOKEN).build()
+    scheduler = AsyncIOScheduler()
+    scheduler.start()
 
+    # Update conversation handler
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
-            NAMA: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_nama),
-                MessageHandler(~filters.TEXT, invalid_input)
-            ],
-            TWITTER: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_twitter),
-                MessageHandler(~filters.TEXT, invalid_input)
-            ],
-            DISCORD: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_discord),
-                MessageHandler(~filters.TEXT, invalid_input)
-            ],
-            TELEGRAM: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_telegram),
-                MessageHandler(~filters.TEXT, invalid_input)
-            ],
-            LINK: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_link),
-                MessageHandler(~filters.TEXT, invalid_input)
-            ],
-            TYPE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, save_data),
-                MessageHandler(~filters.TEXT, invalid_input)
-            ]
+            NAMA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_nama)],
+            TWITTER: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_twitter)],
+            DISCORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_discord)],
+            TELEGRAM: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_telegram)],
+            LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_link)],
+            TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_type)],
+            DEADLINE: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_data)]
         },
         fallbacks=[CommandHandler('cancel', cancel)],
-        conversation_timeout=300,
-        per_message=False
+        conversation_timeout=300
     )
 
-    application.add_handler(conv_handler)
-    application.add_handler(CommandHandler('list', list_airdrops))
-    application.add_handler(CommandHandler('stats', stats_command))
-    application.add_handler(CommandHandler('search', search_airdrops))
-    application.add_handler(CommandHandler('help', help_command))
-    application.add_handler(TypeHandler(Update, limit_rate), group=-1)
+    # Tambah handler baru
+    application.add_handler(CommandHandler('reminder', set_reminder))
+    
+    # ... [Bagian lainnya tetap sama] ...
 
     application.run_polling()
-
-if __name__ == '__main__':
-    main()
