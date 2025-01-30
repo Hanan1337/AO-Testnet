@@ -242,13 +242,15 @@ async def handle_stories(query, username):
 
 async def handle_highlights(query, username):
     try:
-        profile = instaloader.Profile.from_username(loader.context, username)
-        
+        loop = asyncio.get_event_loop()
+        profile = await loop.run_in_executor(None, lambda: instaloader.Profile.from_username(loader.context, username))
+
         if profile.is_private and not profile.followed_by_viewer:
             await query.message.reply_text("🔒 Profil privat - Anda belum follow akun ini")
             return
 
-        highlights = profile.get_highlights()
+        # Menggunakan Instaloader untuk mendapatkan highlights
+        highlights = await loop.run_in_executor(None, lambda: loader.get_highlights(profile))
         
         if not highlights:
             await query.message.reply_text("🌟 Tidak ada highlights yang tersedia")
@@ -267,7 +269,7 @@ async def handle_highlights(query, username):
         )
 
     except Exception as e:
-        logger.error(f"Highlights error: {str(e)}")
+        print(f"Highlights error: {str(e)}")
         await query.message.reply_text("⚠️ Gagal mengambil daftar highlight")
 
 async def handle_profile_info(query, username):
