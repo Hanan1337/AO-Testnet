@@ -27,7 +27,7 @@ async def handle_stories(query, username):
         # Menentukan posisi pointer ke awal sebelum pengiriman
         temp_file.seek(0)
 
-        # Kirim file ke Telegram
+        # Kirim file ke Telegram tanpa ekstensi nama file
         if story.is_video:
             await query.message.reply_video(
                 video=temp_file,
@@ -39,8 +39,6 @@ async def handle_stories(query, username):
                 photo=temp_file,
                 caption=f"📸 Story @{username}"
             )
-
-        # Tidak perlu menghapus file, karena tidak disimpan ke disk
 
     except Exception as e:
         logger.error(f"Story error: {str(e)}")
