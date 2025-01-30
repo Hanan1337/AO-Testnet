@@ -83,26 +83,40 @@ loader = instaloader.Instaloader(
 )
 
 try:
-    # Login menggunakan session cookies lengkap
-    loader.context.load_session_from_file(
-        username=env_vars['INSTAGRAM_USERNAME'],
-        filename=None,
-        session_cookies={
+    # Pertama, coba load session dari file
+        loader.load_session_from_file(env_vars['INSTAGRAM_USERNAME'])
+
+        # Verifikasi session
+        test_profile = instaloader.Profile.from_username(loader.context, env_vars['INSTAGRAM_USERNAME'])
+        logger.info(f"✅ Berhasil login sebagai: {test_profile.full_name} (@{test_profile.username})")
+
+    except FileNotFoundError:
+        # Jika file session tidak ada, login dengan cookies manual
+        logger.info("Session file tidak ditemukan, login manual dengan cookies.")
+        
+        # Update cookies pada session
+        session_cookies = {
             "sessionid": env_vars['INSTAGRAM_SESSIONID'],
             "ds_user_id": env_vars['INSTAGRAM_DS_USER_ID'],
             "csrftoken": env_vars['INSTAGRAM_CSRFTOKEN'],
             "rur": env_vars['INSTAGRAM_RUR'],
             "mid": env_vars['INSTAGRAM_MID']
         }
-    )
-    
-    # Verifikasi session
-    test_profile = instaloader.Profile.from_username(loader.context, env_vars['INSTAGRAM_USERNAME'])
-    logger.info(f"✅ Berhasil login sebagai: {test_profile.full_name} (@{test_profile.username})")
 
-except Exception as e:
-    logger.error(f"❌ Gagal login: {str(e)}")
-    exit(1)
+        # Simpan cookies ke session
+        loader.context.session.cookies.update(session_cookies)
+        loader.save_session_to_file()  # Menyimpan session ke file untuk penggunaan berikutnya
+
+        # Verifikasi login setelah session disimpan
+        test_profile = instaloader.Profile.from_username(loader.context, env_vars['INSTAGRAM_USERNAME'])
+        logger.info(f"✅ Berhasil login sebagai: {test_profile.full_name} (@{test_profile.username})")
+
+    except Exception as e:
+        logger.error(f"❌ Gagal login: {str(e)}")
+        exit(1)
+
+# Panggil fungsi login
+login_with_cookies()
 
 # ========== BOT HANDLERS ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
