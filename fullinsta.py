@@ -15,9 +15,9 @@ from telegram.ext import (
     CallbackQueryHandler
 )
 import instaloader
+from instaloader.exceptions import LoginRequiredException
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
 # Setup logging
@@ -75,23 +75,33 @@ def get_random_headers():
     }
 
 # ========== INSTAGRAM SETUP ==========
-loader = instaloader.Instaloader()
+loader = instaloader.Instaloader(
+    user_agent=random.choice(USER_AGENTS),
+    sleep=True,
+    quiet=True,
+    request_timeout=30
+)
 
 try:
-    # Setup session lengkap
-    cookies = {
-        "sessionid": env_vars['INSTAGRAM_SESSIONID'],
-        "ds_user_id": env_vars['INSTAGRAM_DS_USER_ID'],
-        "csrftoken": env_vars['INSTAGRAM_CSRFTOKEN'],
-        "rur": env_vars['INSTAGRAM_RUR'],
-        "mid": env_vars['INSTAGRAM_MID']
-    }
+    # Login menggunakan session cookies lengkap
+    loader.context.load_session_from_file(
+        username=env_vars['INSTAGRAM_USERNAME'],
+        filename=None,
+        session_cookies={
+            "sessionid": env_vars['INSTAGRAM_SESSIONID'],
+            "ds_user_id": env_vars['INSTAGRAM_DS_USER_ID'],
+            "csrftoken": env_vars['INSTAGRAM_CSRFTOKEN'],
+            "rur": env_vars['INSTAGRAM_RUR'],
+            "mid": env_vars['INSTAGRAM_MID']
+        }
+    )
     
-    loader.context._session.cookies.update(cookies)
-    logger.info("✅ Instagram session initialized successfully")
+    # Verifikasi session
+    test_profile = instaloader.Profile.from_username(loader.context, env_vars['INSTAGRAM_USERNAME'])
+    logger.info(f"✅ Berhasil login sebagai: {test_profile.full_name} (@{test_profile.username})")
 
 except Exception as e:
-    logger.error(f"❌ Failed to initialize Instagram session: {str(e)}")
+    logger.error(f"❌ Gagal login: {str(e)}")
     exit(1)
 
 # ========== BOT HANDLERS ==========
@@ -207,67 +217,51 @@ async def handle_profile_pic(query, username):
 
 async def handle_stories(query, username):
     try:
-        loop = asyncio.get_event_loop()
+        profile = instaloader.Profile.from_username(loader.context, username)
         
-        # Ambil profil user
-        profile = await loop.run_in_executor(None, lambda: instaloader.Profile.from_username(loader.context, username))
-
-        # Cek apakah akun privat dan user tidak follow
         if profile.is_private and not profile.followed_by_viewer:
             await query.message.reply_text("🔒 Profil privat - Anda belum follow akun ini")
             return
 
-        # Ambil semua story dari akun tersebut
-        stories = await loop.run_in_executor(None, lambda: list(loader.get_stories()))
-        
-        # Filter hanya story dari user yang diminta
-        story_items = [item for story in stories if story.owner_id == profile.userid for item in story.get_items()]
-        
+        # Dapatkan story
+        stories = loader.get_stories([profile.userid])
+        story_items = [item for item in stories]
+
         if not story_items:
             await query.message.reply_text("📭 Tidak ada story yang tersedia")
             return
 
-        # Pilih story pertama untuk diunduh
-        story = story_items[0]
-        
-        # Download story
-        await loop.run_in_executor(None, lambda: loader.download_storyitem(story))
-
-        # Cari file hasil unduhan
-        downloaded_files = [f for f in os.listdir('.') if f.startswith(f"{story.owner_username}_")]
-
-        if not downloaded_files:
-            await query.message.reply_text("⚠️ Gagal menemukan file story")
-            return
-
-        # Pilih file terbaru berdasarkan waktu modifikasi
-        downloaded_file = sorted(downloaded_files, key=os.path.getmtime, reverse=True)[0]
+        # Ambil story pertama
+        story = story_items[0].items[0]
+        temp_file = f"temp_story_{username}_{int(time.time())}.{'mp4' if story.is_video else 'jpg'}"
+        loader.download_storyitem(story, temp_file)
 
         # Kirim ke Telegram
-        with open(downloaded_file, 'rb') as f:
+        with open(temp_file, 'rb') as f:
             if story.is_video:
-                await query.message.reply_video(f)
+                await query.message.reply_video(f, caption=f"📹 Story @{username}")
             else:
-                await query.message.reply_photo(f)
+                await query.message.reply_photo(f, caption=f"📸 Story @{username}")
         
-        # Hapus file setelah dikirim
-        os.remove(downloaded_file)
+        os.remove(temp_file)
 
+    except LoginRequiredException:
+        logger.error("Session expired! Perbarui cookie di .env")
+        await query.message.reply_text("⚠️ Session expired, silakan update cookies")
     except Exception as e:
-        print(f"Story error: {str(e)}")
+        logger.error(f"Story error: {str(e)}")
         await query.message.reply_text("⚠️ Gagal mengambil story")
 
 async def handle_highlights(query, username):
     try:
-        loop = asyncio.get_event_loop()
-        profile = await loop.run_in_executor(None, lambda: instaloader.Profile.from_username(loader.context, username))
-
+        profile = instaloader.Profile.from_username(loader.context, username)
+        
         if profile.is_private and not profile.followed_by_viewer:
             await query.message.reply_text("🔒 Profil privat - Anda belum follow akun ini")
             return
 
-        # Menggunakan Instaloader untuk mendapatkan highlights
-        highlights = await loop.run_in_executor(None, lambda: loader.get_highlights(profile))
+        # Dapatkan highlight reels
+        highlights = profile.get_highlight_reels()
         
         if not highlights:
             await query.message.reply_text("🌟 Tidak ada highlights yang tersedia")
@@ -277,7 +271,9 @@ async def handle_highlights(query, username):
         keyboard = []
         for highlight in highlights:
             title = highlight.title[:20] + "..." if len(highlight.title) > 20 else highlight.title
-            keyboard.append([InlineKeyboardButton(f"🌟 {title}", callback_data=f"highlight_{highlight.unique_id}")])
+            keyboard.append(
+                [InlineKeyboardButton(f"🌟 {title}", callback_data=f"highlight_{highlight.unique_id}")]
+            )
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.message.reply_text(
@@ -286,7 +282,7 @@ async def handle_highlights(query, username):
         )
 
     except Exception as e:
-        print(f"Highlights error: {str(e)}")
+        logger.error(f"Highlights error: {str(e)}")
         await query.message.reply_text("⚠️ Gagal mengambil daftar highlight")
 
 async def handle_profile_info(query, username):
