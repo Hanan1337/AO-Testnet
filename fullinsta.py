@@ -207,37 +207,54 @@ async def handle_profile_pic(query, username):
 
 async def handle_stories(query, username):
     try:
-        profile = instaloader.Profile.from_username(loader.context, username)
+        loop = asyncio.get_event_loop()
         
+        # Ambil profil user
+        profile = await loop.run_in_executor(None, lambda: instaloader.Profile.from_username(loader.context, username))
+
+        # Cek apakah akun privat dan user tidak follow
         if profile.is_private and not profile.followed_by_viewer:
             await query.message.reply_text("🔒 Profil privat - Anda belum follow akun ini")
             return
 
-        # Dapatkan story terbaru
-        stories = loader.get_stories([profile.userid])
-        story_items = [item for item in stories]
-
+        # Ambil semua story dari akun tersebut
+        stories = await loop.run_in_executor(None, lambda: list(loader.get_stories()))
+        
+        # Filter hanya story dari user yang diminta
+        story_items = [item for story in stories if story.owner_id == profile.userid for item in story.get_items()]
+        
         if not story_items:
             await query.message.reply_text("📭 Tidak ada story yang tersedia")
             return
 
-        # Download story pertama
+        # Pilih story pertama untuk diunduh
         story = story_items[0]
-        temp_file = f"temp_story_{username}_{int(time.time())}.{'mp4' if story.is_video else 'jpg'}"
         
-        loader.download_storyitem(story, temp_file)
+        # Download story
+        await loop.run_in_executor(None, lambda: loader.download_storyitem(story))
+
+        # Cari file hasil unduhan
+        downloaded_files = [f for f in os.listdir('.') if f.startswith(f"{story.owner_username}_")]
+
+        if not downloaded_files:
+            await query.message.reply_text("⚠️ Gagal menemukan file story")
+            return
+
+        # Pilih file terbaru berdasarkan waktu modifikasi
+        downloaded_file = sorted(downloaded_files, key=os.path.getmtime, reverse=True)[0]
 
         # Kirim ke Telegram
-        with open(temp_file, 'rb') as f:
+        with open(downloaded_file, 'rb') as f:
             if story.is_video:
                 await query.message.reply_video(f)
             else:
                 await query.message.reply_photo(f)
         
-        os.remove(temp_file)
+        # Hapus file setelah dikirim
+        os.remove(downloaded_file)
 
     except Exception as e:
-        logger.error(f"Story error: {str(e)}")
+        print(f"Story error: {str(e)}")
         await query.message.reply_text("⚠️ Gagal mengambil story")
 
 async def handle_highlights(query, username):
