@@ -1,103 +1,88 @@
 async def handle_stories(query, username):
     try:
-        profile = instaloader.Profile.from_username(loader.context, username)
-        
+        import magic
+        from PIL import Image, UnidentifiedImageError
+
+        profile = Profile.from_username(loader.context, username)
+        logger.info(f"🔍 Memproses story @{username}")
+
+        # Validasi akun privat
         if profile.is_private and not profile.followed_by_viewer:
-            await query.message.reply_text("🔒 Profil privat - Anda belum follow akun ini")
+            await query.message.reply_text("🔒 Akses ditolak")
             return
 
-        # Dapatkan dan urutkan story
+        # Ambil story
         stories = []
         for story in loader.get_stories([profile.userid]):
-            stories.extend(story.get_items())
-        
-        stories.sort(key=lambda x: x.date_utc)
-        
+            story_items = list(story.get_items())
+            stories.extend(story_items)
+            logger.info(f"📥 Ditemukan {len(story_items)} story")
+
         if not stories:
-            await query.message.reply_text("📭 Tidak ada story yang tersedia")
+            await query.message.reply_text("📭 Tidak ada story")
             return
 
         temp_dir = f"temp_{username}_{int(time.time())}"
         os.makedirs(temp_dir, exist_ok=True)
+        sent_count = 0
 
-        try:
-            sent_count = 0
-            logger.info(f"🔄 Memproses {len(stories)} story untuk @{username}")
+        for story_item in stories:
+            try:
+                # 1. Download story item
+                loader.download_storyitem(story_item, target=temp_dir)
+                time.sleep(1)
 
-            for story_item in stories:
-                new_path = None
-                try:
-                    # Download story tanpa parameter filename_prefix
-                    loader.download_storyitem(story_item, temp_dir)
-                    
-                    # Cari file terbaru yang bukan .txt atau .xz
-                    list_of_files = [
-                        f for f in os.listdir(temp_dir) 
-                        if not f.endswith(('.txt', '.xz'))
-                    ]
-                    
-                    if not list_of_files:
-                        logger.warning("⚠️ Tidak ada file media yang ditemukan")
-                        continue
-                        
-                    # Ambil file terakhir yang dimodifikasi
-                    latest_file = max(
-                        list_of_files,
-                        key=lambda f: os.path.getctime(os.path.join(temp_dir, f))
-                    )
-                    original_path = os.path.join(temp_dir, latest_file)
-                    
-                    # Tentukan ekstensi
-                    if story_item.is_video:
-                        file_ext = ".mp4"
-                    else:
-                        file_ext = ".jpg"
-                    
-                    # Buat nama file baru
-                    timestamp = int(story_item.date_utc.timestamp())
-                    new_filename = f"story_{timestamp}_{username}{file_ext}"
-                    new_path = os.path.join(temp_dir, new_filename)
-                    os.rename(original_path, new_path)
-                    
-                    # Kirim ke Telegram
-                    with open(new_path, 'rb') as f:
-                        if story_item.is_video:
-                            await query.message.reply_video(
-                                video=f,
-                                caption=f"📹 {story_item.date_utc.strftime('%d-%m-%Y %H:%M')}",
-                                filename=new_filename,
-                                read_timeout=30
-                            )
-                        else:
-                            await query.message.reply_photo(
-                                photo=f,
-                                caption=f"📸 {story_item.date_utc.strftime('%d-%m-%Y %H:%M')}",
-                                filename=new_filename,
-                                read_timeout=30
-                            )
-                    sent_count += 1
-                    logger.info(f"✅ Berhasil mengirim {new_filename}")
+                # 2. Filter file media (abaikan metadata)
+                valid_extensions = ('.jpg', '.jpeg', '.png', '.mp4', '.mov')
+                media_files = [
+                    f for f in glob.glob(os.path.join(temp_dir, "*")) 
+                    if f.lower().endswith(valid_extensions)
+                ]
 
-                except Exception as e:
-                    logger.error(f"Gagal mengirim story: {str(e)}")
+                if not media_files:
+                    logger.warning("🚫 Tidak ada file media yang valid")
                     continue
-                
-                finally:
-                    # Hapus file setelah dikirim
-                    if new_path and os.path.exists(new_path):
-                        os.remove(new_path)
-                    time.sleep(2)
 
-            await query.message.reply_text(f"📤 Total {sent_count} story berhasil dikirim")
+                # 3. Ambil file terbaru
+                latest_file = max(media_files, key=os.path.getctime)
+                logger.info(f"✉️ Mengirim: {os.path.basename(latest_file)}")
 
-        finally:
-            # Bersihkan direktori
-            if os.path.exists(temp_dir):
-                for f in os.listdir(temp_dir):
-                    os.remove(os.path.join(temp_dir, f))
-                os.rmdir(temp_dir)
-                logger.info(f"🗑️ Direktori {temp_dir} berhasil dibersihkan")
+                # 4. Validasi MIME type
+                mime_type = magic.from_file(latest_file, mime=True)
+                if not mime_type.startswith(('image/', 'video/')):
+                    logger.error(f"❌ Tipe file tidak didukung: {mime_type}")
+                    continue
+
+                # 5. Kirim ke Telegram
+                with open(latest_file, "rb") as f:
+                    if story_item.is_video:
+                        await query.message.reply_video(
+                            video=f,
+                            caption=f"📅 {story_item.date_utc.strftime('%H:%M')}",
+                            write_timeout=120
+                        )
+                    else:
+                        await query.message.reply_photo(
+                            photo=f,
+                            caption=f"📅 {story_item.date_utc.strftime('%H:%M')}"
+                        )
+                    sent_count += 1
+
+                # 6. Hapus file
+                os.remove(latest_file)
+
+            except Exception as e:
+                logger.error(f"❌ Gagal: {str(e)}", exc_info=True)
+            finally:
+                # Bersihkan sisa file
+                for f in glob.glob(os.path.join(temp_dir, "*")):
+                    os.remove(f)
+
+        await query.message.reply_text(f"✅ {sent_count} story berhasil dikirim")
 
     except Exception as e:
-        logger.error(f"Story error: {str(e)}", exc_info=True)
-        await query.message.reply_text("⚠️ Gagal mengambil story")
+        logger.error(f"🚨 Error: {str(e)}", exc_info=True)
+        await query.message.reply_text("⚠️ Gagal total")
+    finally:
+        if 'temp_dir' in locals() and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
