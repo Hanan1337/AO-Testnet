@@ -76,6 +76,7 @@ async def handle_highlight_items(query, username, highlight_id):
                             await query.message.reply_video(
                                 video=f,
                                 caption=f"**[{idx}]**.🌟 {highlight.title} - 📹 {local_time.strftime(time_format)}",
+                                parse_mode="Markdown",  # Tambahkan parse_mode di sini
                                 read_timeout=60,
                                 write_timeout=60
                             )
@@ -83,6 +84,7 @@ async def handle_highlight_items(query, username, highlight_id):
                             await query.message.reply_photo(
                                 photo=f,
                                 caption=f"**[{idx}]**.🌟 {highlight.title} - 📸 {local_time.strftime(time_format)}",
+                                parse_mode="Markdown",  # Tambahkan parse_mode di sini
                                 read_timeout=60
                             )
                         sent_count += 1
