@@ -440,8 +440,17 @@ async def handle_highlight_items(query, username, highlight_id):
         os.makedirs(temp_dir, exist_ok=True)
         sent_count = 0
 
+        # Set time zone (contoh: Asia/Jakarta untuk WIB)
+        time_zone = pytz.timezone("Asia/Jakarta")
+
+        # Ubah generator menjadi list
+        highlight_items = list(highlight.get_items())
+
+        # Kirim pesan jumlah item yang diproses
+        await query.message.reply_text(f"🔄 Memproses {len(highlight_items)} item dari highlight '{highlight.title}'")
+
         try:
-            for item in highlight.get_items():
+            for idx, item in enumerate(highlight_items, start=1):
                 # Download item
                 loader.download_storyitem(item, target=temp_dir)
                 time.sleep(3)
@@ -474,22 +483,29 @@ async def handle_highlight_items(query, username, highlight_id):
                     os.remove(latest_file)
                     continue
 
+                # Konversi waktu UTC ke time zone yang ditentukan
+                local_time = item.date_utc.replace(tzinfo=pytz.utc).astimezone(time_zone)
+                time_format = "%d-%m-%Y %H:%M"
+
                 try:
                     with open(latest_file, "rb") as f:
                         if is_video:
                             await query.message.reply_video(
                                 video=f,
-                                caption=f"🌟 {highlight.title}",
+                                caption=f"**[{idx}]**.🌟 {highlight.title} - 📹 {local_time.strftime(time_format)}",
+                                parse_mode="Markdown",  # Tambahkan parse_mode di sini
                                 read_timeout=60,
                                 write_timeout=60
                             )
                         else:
                             await query.message.reply_photo(
                                 photo=f,
-                                caption=f"🌟 {highlight.title}",
+                                caption=f"**[{idx}]**.🌟 {highlight.title} - 📸 {local_time.strftime(time_format)}",
+                                parse_mode="Markdown",  # Tambahkan parse_mode di sini
                                 read_timeout=60
                             )
                         sent_count += 1
+                        logger.info(f"Berhasil mengirim {latest_file} sebagai {'video' if is_video else 'foto'}")
                 except Exception as send_error:
                     logger.error(f"Gagal mengirim file: {str(send_error)}")
                 finally:
